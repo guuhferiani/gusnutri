@@ -223,6 +223,245 @@ app.post('/api/pacientes', async (req, res) => {
   }
 });
 
+// GET /api/pacientes/:id - Busca os dados de um paciente pelo ID
+app.get('/api/pacientes/:id', async (req, res) => {
+  const nutricionistaId = req.headers['x-nutricionista-id'];
+  const { id } = req.params;
+
+  if (!nutricionistaId) {
+    return res.status(400).json({ error: 'Cabeçalho x-nutricionista-id é obrigatório' });
+  }
+
+  try {
+    const result = await sql.query(
+      'SELECT * FROM pacientes WHERE id = $1 AND nutricionista_id = $2',
+      [id, nutricionistaId]
+    );
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'Paciente não encontrado' });
+    }
+
+    res.json(result[0]);
+  } catch (error) {
+    console.error('Erro ao buscar paciente:', error);
+    res.status(500).json({ error: 'Erro interno do servidor ao buscar paciente' });
+  }
+});
+
+// PUT /api/pacientes/:id - Atualiza os dados de um paciente
+app.put('/api/pacientes/:id', async (req, res) => {
+  const nutricionistaId = req.headers['x-nutricionista-id'];
+  const { id } = req.params;
+
+  if (!nutricionistaId) {
+    return res.status(400).json({ error: 'Cabeçalho x-nutricionista-id é obrigatório' });
+  }
+
+  const {
+    nome,
+    data_nascimento,
+    sexo,
+    telefone,
+    whatsapp,
+    email,
+    peso_inicial,
+    altura,
+    objetivos,
+    objetivo_texto,
+    nivel_atividade,
+    patologias,
+    restricoes_alimentares,
+    alergias,
+    medicamentos,
+    suplementos,
+    refeicoes_por_dia,
+    horario_acorda,
+    horario_dorme,
+    litros_agua,
+    atividade_fisica,
+    atividade_fisica_descricao,
+    observacoes
+  } = req.body;
+
+  if (!nome) {
+    return res.status(400).json({ error: 'O nome do paciente é obrigatório' });
+  }
+
+  try {
+    const formattedNascimento = data_nascimento || null;
+    const formattedPeso = peso_inicial ? parseFloat(peso_inicial) : null;
+    const formattedAltura = altura ? parseFloat(altura) : null;
+    const formattedRefeicoes = refeicoes_por_dia ? parseInt(refeicoes_por_dia) : null;
+    const formattedAgua = litros_agua ? parseFloat(litros_agua) : null;
+    const formattedAtividade = atividade_fisica === true || atividade_fisica === 'true';
+
+    const formattedObjetivos = Array.isArray(objetivos) ? objetivos : null;
+    const formattedPatologias = Array.isArray(patologias) ? patologias : null;
+    const formattedRestricoes = Array.isArray(restricoes_alimentares) ? restricoes_alimentares : null;
+    const formattedAlergias = Array.isArray(alergias) ? alergias : null;
+
+    const query = `
+      UPDATE pacientes SET
+        nome = $1, data_nascimento = $2, sexo = $3, telefone = $4, whatsapp = $5, email = $6,
+        peso_inicial = $7, altura = $8, objetivos = $9, objetivo_texto = $10, nivel_atividade = $11,
+        patologias = $12, restricoes_alimentares = $13, alergias = $14, medicamentos = $15, suplementos = $16,
+        refeicoes_por_dia = $17, horario_acorda = $18, horario_dorme = $19, litros_agua = $20,
+        atividade_fisica = $21, atividade_fisica_descricao = $22, observacoes = $23
+      WHERE id = $24 AND nutricionista_id = $25
+      RETURNING id;
+    `;
+
+    const params = [
+      nome, formattedNascimento, sexo || null, telefone || null, whatsapp || null, email || null,
+      formattedPeso, formattedAltura, formattedObjetivos, objetivo_texto || null, nivel_atividade || null,
+      formattedPatologias, formattedRestricoes, formattedAlergias, medicamentos || null, suplementos || null,
+      formattedRefeicoes, horario_acorda || null, horario_dorme || null, formattedAgua,
+      formattedAtividade, atividade_fisica_descricao || null, observacoes || null,
+      id, nutricionistaId
+    ];
+
+    const result = await sql.query(query, params);
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'Paciente não encontrado ou sem permissão para atualizar' });
+    }
+
+    res.json({ message: 'Paciente atualizado com sucesso' });
+  } catch (error) {
+    console.error('Erro ao atualizar paciente:', error);
+    res.status(500).json({ error: 'Erro interno do servidor ao atualizar paciente' });
+  }
+});
+
+// GET /api/pacientes/:id/consultas - Busca as consultas de um paciente
+app.get('/api/pacientes/:id/consultas', async (req, res) => {
+  const nutricionistaId = req.headers['x-nutricionista-id'];
+  const { id } = req.params;
+
+  if (!nutricionistaId) {
+    return res.status(400).json({ error: 'Cabeçalho x-nutricionista-id é obrigatório' });
+  }
+
+  try {
+    // Primeiro verifica se o paciente pertence a essa nutricionista
+    const pacCheck = await sql.query(
+      'SELECT id FROM pacientes WHERE id = $1 AND nutricionista_id = $2',
+      [id, nutricionistaId]
+    );
+
+    if (pacCheck.length === 0) {
+      return res.status(403).json({ error: 'Acesso negado ao paciente' });
+    }
+
+    const result = await sql.query(
+      'SELECT * FROM consultas WHERE paciente_id = $1 ORDER BY data_consulta DESC, created_at DESC',
+      [id]
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error('Erro ao buscar consultas:', error);
+    res.status(500).json({ error: 'Erro interno do servidor ao buscar consultas' });
+  }
+});
+
+// POST /api/pacientes/:id/consultas - Cadastra uma nova consulta
+app.post('/api/pacientes/:id/consultas', async (req, res) => {
+  const nutricionistaId = req.headers['x-nutricionista-id'];
+  const { id } = req.params;
+
+  if (!nutricionistaId) {
+    return res.status(400).json({ error: 'Cabeçalho x-nutricionista-id é obrigatório' });
+  }
+
+  const {
+    data_consulta,
+    peso,
+    cintura,
+    quadril,
+    percentual_gordura,
+    observacoes,
+    proximo_retorno
+  } = req.body;
+
+  if (!data_consulta || !peso) {
+    return res.status(400).json({ error: 'Data da consulta e Peso são campos obrigatórios' });
+  }
+
+  try {
+    // Primeiro verifica se o paciente pertence a essa nutricionista
+    const pacCheck = await sql.query(
+      'SELECT id FROM pacientes WHERE id = $1 AND nutricionista_id = $2',
+      [id, nutricionistaId]
+    );
+
+    if (pacCheck.length === 0) {
+      return res.status(403).json({ error: 'Acesso negado ao paciente' });
+    }
+
+    const formattedPeso = parseFloat(peso);
+    const formattedCintura = cintura ? parseFloat(cintura) : null;
+    const formattedQuadril = quadril ? parseFloat(quadril) : null;
+    const formattedGordura = percentual_gordura ? parseFloat(percentual_gordura) : null;
+    const formattedRetorno = proximo_retorno || null;
+
+    const query = `
+      INSERT INTO consultas (
+        paciente_id, data_consulta, peso, cintura, quadril, percentual_gordura, observacoes, proximo_retorno
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8
+      ) RETURNING id;
+    `;
+
+    const params = [
+      id, data_consulta, formattedPeso, formattedCintura, formattedQuadril, formattedGordura, observacoes || null, formattedRetorno
+    ];
+
+    const result = await sql.query(query, params);
+
+    res.status(201).json({
+      id: result[0]?.id,
+      message: 'Consulta cadastrada com sucesso'
+    });
+  } catch (error) {
+    console.error('Erro ao cadastrar consulta:', error);
+    res.status(500).json({ error: 'Erro interno do servidor ao cadastrar consulta' });
+  }
+});
+
+// GET /api/pacientes/:id/planos-alimentares - Busca o histórico de planos alimentares do paciente
+app.get('/api/pacientes/:id/planos-alimentares', async (req, res) => {
+  const nutricionistaId = req.headers['x-nutricionista-id'];
+  const { id } = req.params;
+
+  if (!nutricionistaId) {
+    return res.status(400).json({ error: 'Cabeçalho x-nutricionista-id é obrigatório' });
+  }
+
+  try {
+    // Primeiro verifica se o paciente pertence a essa nutricionista
+    const pacCheck = await sql.query(
+      'SELECT id FROM pacientes WHERE id = $1 AND nutricionista_id = $2',
+      [id, nutricionistaId]
+    );
+
+    if (pacCheck.length === 0) {
+      return res.status(403).json({ error: 'Acesso negado ao paciente' });
+    }
+
+    const result = await sql.query(
+      'SELECT * FROM planos_alimentares WHERE paciente_id = $1 ORDER BY created_at DESC',
+      [id]
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error('Erro ao buscar planos alimentares:', error);
+    res.status(500).json({ error: 'Erro interno do servidor ao buscar planos alimentares' });
+  }
+});
+
 const PORT = 3001;
 app.listen(PORT, () => {
   console.log(`Servidor Express rodando na porta ${PORT}`);
